@@ -60,7 +60,7 @@ using namespace std;
 //定义若干符号常量
 #define S 32            //假设最多同时打开32个文件
 #define K 5000          //假设磁盘共有5000个盘块
-#define SIZE 64         //假设磁盘的大小是64字节
+#define SIZE 256        //假设磁盘的大小是64字节
 #define CK 8            //命令分解后的段数
 #define INPUT_LEN 128   //输入缓冲区长度
 #define COMMAND_LEN 11  //命令字符串长度
@@ -207,7 +207,6 @@ char *getFileName()
             break;
     return &temppath[x + 1];
 }
-//#define INIT	//决定初始化还是从磁盘读入
 
 int fleshBlock(FCB *fcbp)
 {
@@ -222,6 +221,31 @@ int fleshBlock(FCB *fcbp)
     }
 }
 
+int showAttribute(FCB *fcbp)
+{
+    char Attr[5], Attr1[4] = "RHS";
+    char or_and[6] = {(char)1, (char)2, (char)4, (char)30, (char)29, (char)27};
+    char Attrib = fcbp->Fattrib & (char)7;
+    cout <<setiosflags<< setw(20) << fcbp->FileName ;
+    if (Attrib == (char)0)
+        strcpy(Attr, "普通");
+    else
+    {
+        int i;
+        for (i = 0; i < 3; i++)
+        {
+            if (Attrib & or_and[i])
+                Attr[i] = Attr1[i];
+            else
+                Attr[i] = ' ';
+        }
+        Attr[i] = '\0';
+    }
+    cout <<setiosflags(ios::right) << setw(5)<< Attr << endl;
+    return 1;
+}
+
+#define INIT	//决定初始化还是从磁盘读入
 int main()
 {
 
@@ -232,7 +256,6 @@ int main()
     strcpy(curpath.cpath, "/"); //根目录的路径字符串
 
 #ifdef INIT
-
     int j;
     FCB *fcbp;
     // *********** 初始化FAT和Disk ************
@@ -246,7 +269,7 @@ int main()
     }
     FAT[i] = -1; //根目录尾标记
     FAT[0]--;    //空盘块数减1
-    for (i++; i < 40; i++)
+    for (i++; i <= 40; i++)
     {
         FAT[i] = -1; //各子目录尾标记
         FAT[0]--;
@@ -256,7 +279,7 @@ int main()
     j = 40 * SIZE / sizeof(FCB);
     for (i = 1; i <= j; i++)
     {
-        fcbp->FileName[0] = '\0'; //初始目录树各目录中初始化为空目录项
+        fcbp->FileName[0] = (char)0xe5; //初始目录树各目录中初始化为空目录项
         fcbp++;
     }
     //以下建立初始目录树中各个子目录
@@ -276,15 +299,27 @@ int main()
     fcbp->Addr = 0;                 //该子目录的首盘块号是0，表示是空文件
     fcbp->Fsize = 0;                //该文件的长度为0
     fcbp++;
+    strcpy(fcbp->FileName, "radoapx"); //文件unix的目录项
+    fcbp->Fattrib = 16;                //表示是普通文件
+    fcbp->Addr = 40;                   //该子目录的首盘块号是0，表示是空文件
+    fcbp->Fsize = 0;                   //该文件的长度为0
+    fcbp++;
     strcpy(fcbp->FileName, "dev"); //子目录etc
     fcbp->Fattrib = 16;            //表示是子目录
     fcbp->Addr = 33;               //该子目录的首盘块号是33
     fcbp->Fsize = 0;               //约定子目录的长度为0
+
     fcbp = (FCB *)Disk[31];
     strcpy(fcbp->FileName, ".."); //bin的父目录对应的目录项
     fcbp->Fattrib = 16;           //表示是目录而不是文件
     fcbp->Addr = 1;               //父目录(此处是根目录)的首盘块号是1
     fcbp->Fsize = 0;              //约定子目录的长度为0
+    fcbp = (FCB *)Disk[40];
+    strcpy(fcbp->FileName, ".."); //radoapx的父目录对应的目录项
+    fcbp->Fattrib = 16;           //表示是目录而不是文件
+    fcbp->Addr = 1;               //父目录(此处是根目录)的首盘块号是1
+    fcbp->Fsize = 0;              //约定子目录的长度为0
+
     fcbp = (FCB *)Disk[32];
     strcpy(fcbp->FileName, ".."); //usr的父目录对应的目录项
     fcbp->Fattrib = 16;           //表示是目录而不是文件
@@ -414,7 +449,6 @@ int main()
     Udelp = pp[1];
 
 #endif
-
     for (i = 0; i < S; i++) //初始化UOF。state：0＝空表项；1＝新建；2＝打开
         uof[i].state = 0;   //初始化为空表项
 
@@ -706,7 +740,12 @@ int GetAttrib(char *str, char &attrib)
     // }
     len = strlen(str);
     strlwr(str); //转换成小写字母
-    for (i = 0; i < len; i++)
+    if(str[0]=='|') {
+        i = 1;
+    }else{
+        i = 0;
+    }
+    for (; i < len; i++)
     {
         switch (str[i])
         {
@@ -807,7 +846,7 @@ int DirComd(int k) //dir命令，显示指定目录的内容（文件名或目�
     while (s > 0)
     {
         p = (FCB *)Disk[s]; //p指向该目录的第一个盘块
-        for (i = 0; i < 4; i++, p++)
+        for (i = 0; i < SIZE / sizeof(FCB); i++, p++)
         {
             ch = p->FileName[0];  //取文件(目录)名的第一个字符
             if (ch == (char)0xe5) //空目录项
@@ -1077,7 +1116,7 @@ int RdComd(int k)
     while (s > 0) //循环查找，直到目录尾部
     {
         p = (FCB *)Disk[s];
-        for (i = 0; i < 4; i++, p++)
+        for (i = 0; i < SIZE / sizeof(FCB); i++, p++)
         {
             if (p->FileName[0] != (char)0xe5 && p->FileName[0] != '\0') //累计非空目录项
                 count++;
@@ -1106,7 +1145,7 @@ int RdComd(int k)
     while (s > 0) //整理DirName的父目录空间(回收无目录项的盘块)
     {
         p = (FCB *)Disk[s];
-        for (j = i = 0; i < 4; i++, p++)
+        for (j = i = 0; i < SIZE / sizeof(FCB); i++, p++)
             if (p->FileName[0] != (char)0xe5 && p->FileName[0] != '\0') //累计非空目录项
                 j++;
         if (j == 0)
@@ -1283,7 +1322,7 @@ int FindBlankFCB(short s, FCB *&fcbp1) //寻找首块号为s的目录中的空�
     while (s > 0) //在首块号为s的目录找空登记栏，直到目录尾部
     {
         fcbp1 = (FCB *)Disk[s];
-        for (i = 0; i < 4; i++, fcbp1++)
+        for (i = 0; i < SIZE / sizeof(FCB); i++, fcbp1++)
             if (fcbp1->FileName[0] == (char)0xe5 || fcbp1->FileName[0] == '\0')
             {
                 fcbp1->Addr = fcbp1->Fsize = 0; //假设为空目录项
@@ -1305,7 +1344,7 @@ int FindBlankFCB(short s, FCB *&fcbp1) //寻找首块号为s的目录中的空�
     }
     FAT[s0] = s; //构成FAT链
     fcbp1 = (FCB *)Disk[s];
-    for (i = 0; i < 4; i++, fcbp1++)
+    for (i = 0; i < SIZE / sizeof(FCB); i++, fcbp1++)
         fcbp1->FileName[0] = '\0'; //置空目录标志
     fcbp1 = (FCB *)Disk[s];
     fcbp1->Addr = fcbp1->Fsize = 0; //假设为空目录项
@@ -1502,14 +1541,6 @@ int WriteComd(int k) //write命令的处理函数
     // 若无参数 "insert" ，写入的内容代替文件原先的内容(对应位置的内容)。
     // 写入完毕调整文件长度和写指针值。
     // 若文件未打开或文件不存在，分别给出错误信息。
-
-    // 可以有如下几种命令形式：
-    //	write <文件名> ——在写指针当前所指位置写，写入内容代替原内容(代替方式或改写方式)
-    //	write <文件名> <n>——在文件开头第n个字节处写，改写方式
-    //	write <文件名> insert——在写指针所指位置写，写入处开始的原内容后移(插入方式)
-    //	write <文件名> <n> insert——在文件开头第n个字节处写，插入方式
-    //	write <文件名> append——在文件尾部写(添加方式)
-
     // 考程序中提供的以下5种命令形式：
     // write <文件名> ——在写指针当前所指位置写，写入内容代替原内容(改写方式)
     // write <文件名> |pn——在文件开头第n个字节处写，改写方式
@@ -2162,7 +2193,7 @@ int UndelComd(int k) //undel命令
     while (s > 0) //在首块号为s的目录找被删除文件的表项，直到目录尾部
     {
         fcbp1 = (FCB *)Disk[s];
-        for (i = 0; i < 4; i++, fcbp1++)
+        for (i = 0; i < SIZE / sizeof(FCB); i++, fcbp1++)
         {
             if (fcbp1->FileName[0] == (char)0xe5) //找到可能进行删除恢复的目录项
             {
@@ -2773,19 +2804,26 @@ int AttribComd(int k) //attrib命令的处理函数：修改文件或目录属�
     // 当命令中指定的文件已打开或不存在，给出错误信息；
     // 当命令中提供的参数错误，也显示出错信息。
 
-    short i, j, i_uof, s;
+    short i, j, i_uof, s, isAll = 0;
     char Attrib, attrib = '\40';
     char Attr[5], Attr1[4] = "RHS";
     char attr[6][3] = {"+r", "+h", "+s", "-r", "-h", "-s"};
-    char or_and[6] = {'\01', '\02', '\04', '\036', '\035', '\033'};
+    char or_and[6] = {(char)1, (char)2, (char)4, (char)30, (char)29, (char)27};
     FCB *fcbp;
 
     if (k < 1)
     {
-        cout << "\n命令中没有指定文件名。\n";
+        cout << "参数错误。\n";
         return -1;
     }
+    if (strcmp(comd[1], "*") == 0)
+    {
+        strcpy(comd[1], curpath.cpath);
+        isAll = 1;
+    }
+    cout << comd[1] << endl;
     s = FindPath(comd[1], attrib, 1, fcbp); //寻找指定的文件或目录并返回其首块号
+    cout << s<< endl;
     if (s < 0)
     {
         cout << '\n'
@@ -2794,22 +2832,27 @@ int AttribComd(int k) //attrib命令的处理函数：修改文件或目录属�
     }
     if (k == 1) //显示文件/目录的属性
     {
-        Attrib = fcbp->Fattrib & '\07';
-        if (Attrib == '\0')
-            strcpy(Attr, "普通");
+        if (isAll == 0)
+        {
+            showAttribute(fcbp);
+        }
         else
         {
-            for (i = 0; i < 3; i++)
+            int block = s;
+            while (block > 0)
             {
-                if (Attrib & or_and[i])
-                    Attr[i] = Attr1[i];
-                else
-                    Attr[i] = ' ';
+                fcbp = (FCB *)Disk[block];
+                for (int i = 0; i < SIZE / sizeof(FCB); i++, fcbp++)
+                {
+                    if (fcbp->FileName[0] == (char)0xe5){
+                        continue;
+                    }
+                    // cout << "111:" << fcbp->FileName;
+                    showAttribute(fcbp);
+                }
+                block = FAT[block];
             }
-            Attr[i] = '\0';
         }
-        cout << "\n"
-             << temppath << "的属性是：" << Attr << endl;
         return 1;
     }
     if (fcbp->Fattrib <= '\07') //若是文件，要查其是否已被打开
@@ -2996,7 +3039,7 @@ int FindFCB(char *Name, int s, char attrib, FCB *&fcbp)
     while (s > 0)
     {
         fcbp = (FCB *)Disk[s];
-        for (i = 0; i < 4; i++, fcbp++) //每个盘块4个目录项
+        for (i = 0; i < SIZE / sizeof(FCB); i++, fcbp++) //每个盘块4个目录项
         {
             ch = fcbp->FileName[0];
             if (ch == (char)0xe5)
@@ -3800,12 +3843,12 @@ int batchComd(int k)
                     break;
                 }
             }
-            if (i == 64 || i == 63)
+            if (i == SIZE || i == SIZE - 1)
             {
                 fileBlock = FAT[fileBlock]; //准备读下一个盘块
                 i = 0;
             }
-            if (i <= 63)
+            if (i <= SIZE - 1)
             {
                 comds[j] = '\0';
                 strcpy(BatchComds[BatchHeader], comds);
