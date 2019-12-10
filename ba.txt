@@ -1,0 +1,5 @@
+create a
+write
+close
+type a>>map
+type a>>map
