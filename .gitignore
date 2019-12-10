@@ -1,2 +1,5 @@
 .vscode/
 *.exe
+os
+os.dSYM/
+.DS_Store
