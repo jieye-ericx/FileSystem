@@ -48,6 +48,7 @@
 #include <iostream> //cout,cin
 #include <iomanip>  //setw(),setiosflags()
 #include <stdlib.h> //exit(),atoi()
+#include <cstdlib>
 #include <string.h> //strcpy(),_stricmp()
 #include <fstream>  //文件操作用
 #include <cstring>
@@ -96,13 +97,21 @@ struct CurPath //定义存储当前目录的数据结构
     char cpath[PATH_LEN]; //当前目录绝对路径字符串(全路径名)
 };
 
-struct UnDel //恢复被删除文件表的数据结构
+// struct UnDel //恢复被删除文件表的数据结构
+// {
+//     char gpath[PATH_LEN];      //被删除文件的全路径名(不含文件名)
+//     char ufname[FILENAME_LEN]; //被删除文件名
+//     short ufaddr;              //被删除文件名的首块号
+//     short fb;                  //存储被删除文件块号的第一个块号(链表头指针)
+//                                //首块号也存于fb所指的盘块中
+// };
+struct UnDel //恢复被删除文件的数据结构(共128字节)
 {
-    char gpath[PATH_LEN];      //被删除文件的全路径名(不含文件名)
+    char gpath[112];           //被删除文件的全路径名(不含文件名)
     char ufname[FILENAME_LEN]; //被删除文件名
-    short ufaddr;              //被删除文件名的首块号
-    short fb;                  //存储被删除文件块号的第一个块号(链表头指针)
-                               //首块号也存于fb所指的盘块中
+    char ufattr;               //被删除文件属性
+    short ufaddr;              //被删除文件的首块号
+    short fb;                  //存储被删除文件长度及块号的指针(首块号)
 };
 
 //关于恢复被删除文件问题，还可以采用类似于Windows的回收站的方法。例如可以在根目录中
@@ -132,10 +141,11 @@ UnDel udtab[DM]; //定义删除文件恢复表，退出系统时该表可存于文件UdTab.dat中
 short Udelp = 0; //udtab表的第一个空表项的下标，系统初始化时它为0。
                  //当Udelp=DM时，表示表已满，需清除最早的表项(后续表项依次前移)
 short ffbp = 1;
+short udtabblock = 4079;
 //0号盘快中存储如下内容：
 //	short ffbp;		//从该位置开始查找空闲盘快(类似循环首次适应分配)
 //	short Udelp;	//udtab表的第一个空表项的下标
-
+// short udtabblock; //udtab表的首块号
 int dspath = 1; //dspath=1,提示符中显示当前目录
 
 //函数原型说明
@@ -219,6 +229,7 @@ int fleshBlock(FCB *fcbp)
         FAT[t] = 0;
         FAT[0]++;
     }
+    return 1;
 }
 
 int showAttribute(FCB *fcbp)
@@ -274,6 +285,12 @@ int main()
         FAT[i] = -1; //各子目录尾标记
         FAT[0]--;
     }
+    for (i = 4979; i < K - 1; i++) //构造根目录盘块链
+    {
+        FAT[i] = i + 1; //初始化根目录的FAT表
+        FAT[0]--;       //空盘块数减1
+    }
+    FAT[i] = -1;
     // *********** 初始化Disk ************
     fcbp = (FCB *)Disk[1];
     j = 40 * SIZE / sizeof(FCB);
@@ -429,24 +446,31 @@ int main()
             break;
     ffi.close();
 
-    //读入恢复删除文件表UdTab.dat信息
-    ffi.open("UdTab.dat", ios::binary | ios::in);
-    if (!ffi)
-    {
-        cout << "Can't open UdTab.dat!\n";
-        cin >> yn;
-        exit(0);
-    }
-    for (i = 0; i < DM; i++) //从文件Disk.dat读入盘块内容
-        if (ffi)
-            ffi.read((char *)&udtab[i], sizeof(udtab[0]));
-        else
-            break;
+    // //读入恢复删除文件表UdTab.dat信息
+    // ffi.open("UdTab.dat", ios::binary | ios::in);
+    // if (!ffi)
+    // {
+    //     cout << "Can't open UdTab.dat!\n";
+    //     cin >> yn;
+    //     exit(0);
+    // }
+    // for (i = 0; i < DM; i++) //从文件Disk.dat读入盘块内容
+    //     if (ffi)
+    //         ffi.read((char *)&udtab[i], sizeof(udtab[0]));
+    //     else
+    //         break;
     ffi.close();
 
     short *pp = (short *)Disk[0];
     ffbp = pp[0];
     Udelp = pp[1];
+    udtabblock = pp[2];
+    UnDel *ud = (UnDel *)Disk[udtabblock];
+    for (i = 0; i < DM; i++)
+    {
+        udtab[i] = *ud;
+        ud++;
+    }
 
 #endif
     for (i = 0; i < S; i++) //初始化UOF。state：0＝空表项；1＝新建；2＝打开
@@ -796,10 +820,10 @@ int DirComd(int k) //dir命令，显示指定目录的内容（文件名或目录名等）
     // 学生可考虑将此函数修改成命令中的路径的最后允许是文件名的情况。
     // 另外还可以考虑含通配符的问题。
 
-    short i, s, status = 0,pos;
+    short i, s, ss, status = 0, pos, newFile;
     short filecount, dircount, fsizecount; //文件数、目录数、文件长度累计
     char ch, attrib = '\0', attr, cc;
-    FCB *fcbp, *p,*target;
+    FCB *fcbp, *p, *target;
 
     filecount = dircount = fsizecount = 0;
     if (k > 4) //命令中多于1个参数，错误(较复杂的处理应当允许有多个参数)
@@ -858,11 +882,14 @@ int DirComd(int k) //dir命令，显示指定目录的内容（文件名或目录名等）
         if (i < 0)
             return i;
     }
-    if(status>0){
-        
-    }
-    cout << "\nThe Directory of C:" << temppath << endl
-         << endl;
+    ss = s;
+    char buf[1000000], *tempBuf;
+
+    // cout << "\nThe Directory of C:" << temppath << endl
+    //      << endl;
+    strcpy(buf, "\nThe Directory of C:");
+    strcat(buf, temppath);
+    strcat(buf, "\n");
     while (s > 0)
     {
         p = (FCB *)Disk[s]; //p指向该目录的第一个盘块
@@ -885,16 +912,24 @@ int DirComd(int k) //dir命令，显示指定目录的内容（文件名或目录名等）
                 if (attrib != cc) //只显示指定属性的文件
                     continue;
             }
-            cout << setiosflags(ios::left) << setw(20) << p->FileName;
+            strcat(buf, p->FileName);
+            // cout << setiosflags(ios::left) << setw(20) << p->FileName;
             if (p->Fattrib >= '\20') //是子目录
             {
-                cout << "<DIR>\n";
+                strcat(buf, "      <DIR>\n");
+                // cout << "<DIR>\n";
                 dircount++;
             }
             else
             {
-                cout << resetiosflags(ios::left);
-                cout << setiosflags(ios::right) << setw(10) << p->Fsize << endl;
+                strcat(buf, "   ");
+                sprintf(tempBuf, "%d", p->Fsize);
+                // itoa(p->Fsize, tempBuf, 10);
+                strcat(buf, tempBuf);
+                strcat(buf, "\n");
+
+                // cout << resetiosflags(ios::left);
+                // cout << setiosflags(ios::right) << setw(10) << p->Fsize << endl;
                 filecount++;
                 fsizecount += p->Fsize;
             }
@@ -903,11 +938,60 @@ int DirComd(int k) //dir命令，显示指定目录的内容（文件名或目录名等）
             break;
         s = FAT[s]; //指向该目录的下一个盘块
     }
-    cout << resetiosflags(ios::left) << endl;
-    cout << setiosflags(ios::right) << setw(6) << filecount << " file(s)";
-    cout << setw(8) << fsizecount << " bytes" << endl;
-    cout << setw(6) << dircount << " dir(s) " << setw(8) << SIZE * FAT[0];
-    cout << " free" << endl;
+    // cout << resetiosflags(ios::left) << endl;
+    // itoa(filecount, tempBuf, 10);
+    sprintf(tempBuf, "%d", filecount);
+    strcat(buf, tempBuf);
+    strcat(buf, " file(s)");
+    // cout << setiosflags(ios::right) << setw(6) << filecount << " file(s)";
+    // itoa(fsizecount, tempBuf, 10);
+    sprintf(tempBuf, "%d", fsizecount);
+    strcat(buf, tempBuf);
+    strcat(buf, " bytes");
+    // cout << setw(8) << fsizecount << " bytes" << endl;
+    // itoa(dircount, tempBuf, 10);
+    sprintf(tempBuf, "%d", dircount);
+    strcat(buf, tempBuf);
+    strcat(buf, " dir(s)    ");
+    // itoa(SIZE * FAT[0], tempBuf, 10);
+    sprintf(tempBuf, "%d", SIZE * FAT[0]);
+    strcat(buf, tempBuf);
+    strcat(buf, " free");
+    strcat(buf, "\000\0\0");
+    // cout << setw(6) << dircount << " dir(s) " << setw(8) << SIZE * FAT[0];
+    // cout << " free" << endl;
+    if (status == 0)
+        cout << buf << endl;
+    else
+    {
+        newFile = FindBlankFCB(1, fcbp); //寻找首块号为s的目录中的空目录项
+        if (newFile < 0)
+        {
+            cout << "出现错误.";
+            return newFile;
+        }
+        strcpy(fcbp->FileName, "tempFile"); //目录项中保存文件名
+        fcbp->Fattrib = (char)0;            //复制文件属性
+        fcbp->Addr = 0;                     //空文件首块号设为0
+        fcbp->Fsize = 0;                    //空文件长度为0
+        buffer_to_file(fcbp, buf);
+        if (status == 1)
+        {
+            strcpy(comd[1], "/tempFile");
+            strcpy(comd[2], comd[pos + 1]);
+            // CopyComd(2);
+        }
+        else
+        {
+            strcpy(comd[7], comd[pos + 1]);
+            strcpy(comd[1], comd[7]);
+            strcat(comd[1], "+/tempFile");
+            strcpy(comd[2], comd[7]);
+        }
+        CopyComd(2);
+        fleshBlock(fcbp);
+    }
+
     return 1;
 }
 
@@ -2014,8 +2098,10 @@ int PutUdtab(FCB *fp)
     strcpy(udtab[Udelp].gpath, temppath);
     strcpy(udtab[Udelp].ufname, fp->FileName);
     bb = udtab[Udelp].ufaddr = fp->Addr;
-    udtab[Udelp].fb = SAVE_bn(bb); //保存被删除文件的盘块号
-    Udelp++;                       //调整指针位置
+    udtab[Udelp].fb = SAVE_bn(bb);     //保存被删除文件的盘块号
+    udtab[Udelp].ufattr = fp->Fattrib; //保存被删除文件的盘块号
+
+    Udelp++; //调整指针位置
     return 1;
 }
 
@@ -2030,55 +2116,121 @@ int DelComd(int k) //del(删除文件)命令处理函数
     // 删除文件时，将该文件的有关信息记录到删除文件恢复信息表udtab中，
     // 以备将来恢复时使用。
 
-    short i, s0, s;
+    short i, s0, s, isAll = 0;
     char yn, attr;
     char attrib = '\0', *FileName;
     char gFileName[PATH_LEN]; //存放文件全路径名
-    FCB *fcbp;
+    FCB *fcbp, *fcbp1;
 
-    s0 = ProcessPath(comd[1], FileName, k, 1, '\20'); //取FileName所在目录的首块号
-    if (s0 < 1)                                       //路径错误
-        return s0;                                    //失败，返回
-    s = FindFCB(FileName, s0, attrib, fcbp);          //取FileName的首块号(查其存在性)
-    if (s < 0)
+    if (strcmp(comd[1], "*") == 0)
     {
-        cout << "\n要删除的文件不存在。\n";
-        return -2;
+        strcpy(comd[1], curpath.cpath);
+        isAll = 1;
     }
-    strcpy(gFileName, temppath);
-    i = strlen(temppath);
-    if (temppath[i - 1] != '/')
-        strcat(gFileName, "/");
-    strcat(gFileName, FileName); //构造文件的全路径名
-    i = Check_UOF(gFileName);    //查UOF
-    if (i < S)                   //该文件已在UOF中
+    if (isAll == 1)
     {
-        cout << "\n文件" << gFileName << "正在使用，不能删除!\n";
-        return -3;
+        int block = curpath.fblock;
+        while (block > 0)
+        {
+            fcbp1 = (FCB *)Disk[block];
+            for (int i = 0; i < SIZE / sizeof(FCB); i++, fcbp1++)
+            {
+                if (fcbp1->FileName[0] == (char)0xe5 || strcmp(fcbp1->FileName, "..") == 0)
+                {
+                    continue;
+                }
+                // cout << "111:" << fcbp->FileName;
+                s = FindFCB(fcbp1->FileName, block, attrib, fcbp); //取FileName的首块号(查其存在性)
+                if (s < 0)
+                {
+                    cout << "\n要删除的文件不存在。\n";
+                    return -2;
+                }
+                strcpy(gFileName, temppath);
+                i = strlen(temppath);
+                if (temppath[i - 1] != '/')
+                    strcat(gFileName, "/");
+                strcat(gFileName, FileName); //构造文件的全路径名
+                i = Check_UOF(gFileName);    //查UOF
+                if (i < S)                   //该文件已在UOF中
+                {
+                    cout << "\n文件" << gFileName << "正在使用，不能删除!\n";
+                    return -3;
+                }
+                attr = fcbp->Fattrib & '\01';
+                if (attr == '\01')
+                {
+                    cout << "\n文件" << gFileName << "是只读文件，你确定要删除它吗？(y/n) ";
+                    cin >> yn;
+                    if (yn != 'Y' && yn != 'y')
+                        return 0; //不删除，返回
+                }
+                i = PutUdtab(fcbp); //被删除文件的有关信息保存到udtab表中
+                if (i < 0)          //因磁盘空间不足，不能保存被删除文件的信息
+                {
+                    cout << "\n你是否仍要删除文件 " << gFileName << " ? (y/n) : ";
+                    cin >> yn;
+                    if (yn == 'N' || yn == 'n')
+                        return 0; //不删除返回
+                }
+                fcbp->FileName[0] = (char)0xe5; //删除目录项
+                while (s > 0)                   //回收磁盘空间
+                {
+                    s0 = s;
+                    s = FAT[s];
+                    FAT[s0] = 0;
+                    FAT[0]++;
+                }
+            }
+            block = FAT[block];
+        }
     }
-    attr = fcbp->Fattrib & '\01';
-    if (attr == '\01')
+    else
     {
-        cout << "\n文件" << gFileName << "是只读文件，你确定要删除它吗？(y/n) ";
-        cin >> yn;
-        if (yn != 'Y' && yn != 'y')
-            return 0; //不删除，返回
-    }
-    i = PutUdtab(fcbp); //被删除文件的有关信息保存到udtab表中
-    if (i < 0)          //因磁盘空间不足，不能保存被删除文件的信息
-    {
-        cout << "\n你是否仍要删除文件 " << gFileName << " ? (y/n) : ";
-        cin >> yn;
-        if (yn == 'N' || yn == 'n')
-            return 0; //不删除返回
-    }
-    fcbp->FileName[0] = (char)0xe5; //删除目录项
-    while (s > 0)                   //回收磁盘空间
-    {
-        s0 = s;
-        s = FAT[s];
-        FAT[s0] = 0;
-        FAT[0]++;
+        s0 = ProcessPath(comd[1], FileName, k, 1, '\20'); //取FileName所在目录的首块号
+        if (s0 < 1)                                       //路径错误
+            return s0;                                    //失败，返回
+        s = FindFCB(FileName, s0, attrib, fcbp);          //取FileName的首块号(查其存在性)
+        if (s < 0)
+        {
+            cout << "\n要删除的文件不存在。\n";
+            return -2;
+        }
+        strcpy(gFileName, temppath);
+        i = strlen(temppath);
+        if (temppath[i - 1] != '/')
+            strcat(gFileName, "/");
+        strcat(gFileName, FileName); //构造文件的全路径名
+        i = Check_UOF(gFileName);    //查UOF
+        if (i < S)                   //该文件已在UOF中
+        {
+            cout << "\n文件" << gFileName << "正在使用，不能删除!\n";
+            return -3;
+        }
+        attr = fcbp->Fattrib & '\01';
+        if (attr == '\01')
+        {
+            cout << "\n文件" << gFileName << "是只读文件，你确定要删除它吗？(y/n) ";
+            cin >> yn;
+            if (yn != 'Y' && yn != 'y')
+                return 0; //不删除，返回
+        }
+        i = PutUdtab(fcbp); //被删除文件的有关信息保存到udtab表中
+        if (i < 0)          //因磁盘空间不足，不能保存被删除文件的信息
+        {
+            cout << "\n你是否仍要删除文件 " << gFileName << " ? (y/n) : ";
+            cin >> yn;
+            if (yn == 'N' || yn == 'n')
+                return 0; //不删除返回
+        }
+        fcbp->FileName[0] = (char)0xe5; //删除目录项
+        while (s > 0)                   //回收磁盘空间
+        {
+            s0 = s;
+            s = FAT[s];
+            FAT[s0] = 0;
+            FAT[0]++;
+        }
     }
     return 1;
 }
@@ -2464,6 +2616,39 @@ int CopyComd(int k) //copy命令的处理函数：复制文件
     {
         cout << "\n命令中参数太多或太少。\n";
         return -1;
+    }
+    for (int j = 1; j <= k; j++)
+    {
+        if (strcmp(comd[j], "*") == 0)
+        {
+            int block = curpath.fblock;
+            while (block > 0)
+            {
+                fcbp1 = (FCB *)Disk[block];
+                for (int i = 0; i < SIZE / sizeof(FCB); i++, fcbp1++)
+                {
+                    if (fcbp1->FileName[0] == (char)0xe5 || strcmp(fcbp1->FileName, "..") == 0 || fcbp1->Fattrib >= (char)16)
+                    {
+                        continue;
+                    }
+                    char comd1[INPUT_LEN];
+                    strcpy(comd1, "copy ");
+                    strcat(comd1, fcbp1->FileName);
+                    strcat(comd1, " ");
+                    strcat(comd1, comd[j + 1]);
+                    strcpy(BatchComds[BatchHeader], comd1);
+                    BatchHeader = (BatchHeader + 1) % BATCHNUM;
+                    if (BatchRail == BatchHeader)
+                    {
+                        cout << "batch缓冲区已满，请缩短命令行数或增大缓冲区，已经读入的将被复制。" << endl;
+                        BatchHeader--;
+                        return -1;
+                    }
+                }
+                block = FAT[block];
+            }
+            return 1;
+        }
     }
     for (int i = 0; i < strlen(comd[1]); i++)
     {
@@ -3040,6 +3225,17 @@ void save_Disk() //保存盘块中的文件内容
     short *p = (short *)Disk[0];
     p[0] = ffbp;
     p[1] = Udelp;
+    p[2] = udtabblock;
+    UnDel *ud = (UnDel *)Disk[udtabblock];
+    for (i = 0; i < DM; i++)
+    {
+        strcpy(ud->gpath, udtab[i].gpath);
+        ud->ufaddr = udtab[i].ufaddr;
+        ud->ufattr = udtab[i].ufattr;
+        ud->fb = udtab[i].fb;
+        strcpy(ud->ufname, udtab[i].ufname);
+        ud++;
+    }
     ofstream ffo("Disk.dat", ios::binary);
     for (i = 0; i < K; i++)
         ffo.write((char *)&Disk[i], SIZE);
@@ -3051,10 +3247,10 @@ void save_Disk() //保存盘块中的文件内容
 void save_UdTab() //保存被删除文件信息表
 {
     int i;
-    ofstream ffo("UdTab.dat", ios::binary);
-    for (i = 0; i < DM; i++)
-        ffo.write((char *)&udtab[i], sizeof(udtab[0]));
-    ffo.close();
+    // ofstream ffo("UdTab.dat", ios::binary);
+    // for (i = 0; i < DM; i++)
+    //     ffo.write((char *)&udtab[i], sizeof(udtab[0]));
+    // ffo.close();
 }
 
 /////////////////////////////////////////////////////////////////
