@@ -237,7 +237,12 @@ int showAttribute(FCB *fcbp)
     char Attr[5], Attr1[4] = "RHS";
     char or_and[6] = {(char)1, (char)2, (char)4, (char)30, (char)29, (char)27};
     char Attrib = fcbp->Fattrib & (char)7;
-    cout << setiosflags << setw(20) << fcbp->FileName;
+    cout << setw(5) << fcbp->FileName;
+    if(fcbp->Fattrib>=(char)7){
+        cout <<setw(5)<< " <DIR> ";
+    }else{
+        cout <<setw(5)<< "       ";
+    }
     if (Attrib == (char)0)
         strcpy(Attr, "普通");
     else
@@ -942,12 +947,12 @@ int DirComd(int k) //dir命令，显示指定目录的内容（文件名或目录名等）
     // itoa(filecount, tempBuf, 10);
     sprintf(tempBuf, "%d", filecount);
     strcat(buf, tempBuf);
-    strcat(buf, " file(s)");
+    strcat(buf, " file(s) ");
     // cout << setiosflags(ios::right) << setw(6) << filecount << " file(s)";
     // itoa(fsizecount, tempBuf, 10);
     sprintf(tempBuf, "%d", fsizecount);
     strcat(buf, tempBuf);
-    strcat(buf, " bytes");
+    strcat(buf, " bytes ");
     // cout << setw(8) << fsizecount << " bytes" << endl;
     // itoa(dircount, tempBuf, 10);
     sprintf(tempBuf, "%d", dircount);
@@ -1379,10 +1384,13 @@ int blockf(int k) //block命令处理函数(显示文件或目录占用的盘块号)
     char attrib = '\040'; //32表示任意(文件或子目录)目录项都可以
     FCB *fcbp;
 
-    if (k != 1)
+    if (k > 1)
     {
         cout << "\n命令中参数个数错误。\n";
         return -1;
+    }
+    if(k==0){
+        strcpy(comd[1], newestOperateFile);
     }
     s = FindPath(comd[1], attrib, 1, fcbp); //找指定目录(的首块号)
     if (s < 1)
@@ -2135,18 +2143,20 @@ int DelComd(int k) //del(删除文件)命令处理函数
             fcbp1 = (FCB *)Disk[block];
             for (int i = 0; i < SIZE / sizeof(FCB); i++, fcbp1++)
             {
-                if (fcbp1->FileName[0] == (char)0xe5 || strcmp(fcbp1->FileName, "..") == 0)
+                if (fcbp1->FileName[0] == (char)0xe5 || strcmp(fcbp1->FileName, "..") == 0||fcbp1->Fattrib>=(char)16)
                 {
                     continue;
                 }
                 // cout << "111:" << fcbp->FileName;
-                s = FindFCB(fcbp1->FileName, block, attrib, fcbp); //取FileName的首块号(查其存在性)
-                if (s < 0)
-                {
-                    cout << "\n要删除的文件不存在。\n";
-                    return -2;
-                }
-                strcpy(gFileName, temppath);
+                // s = FindFCB(fcbp1->FileName, block, attrib, fcbp); //取FileName的首块号(查其存在性)
+                // if (s < 0)
+                // {
+                //     cout << "\n要删除的文件不存在。\n";
+                //     return -2;
+                // }
+                fcbp = fcbp1;
+                FileName = fcbp->FileName;
+                strcpy(gFileName, curpath.cpath);
                 i = strlen(temppath);
                 if (temppath[i - 1] != '/')
                     strcat(gFileName, "/");
@@ -2173,14 +2183,7 @@ int DelComd(int k) //del(删除文件)命令处理函数
                     if (yn == 'N' || yn == 'n')
                         return 0; //不删除返回
                 }
-                fcbp->FileName[0] = (char)0xe5; //删除目录项
-                while (s > 0)                   //回收磁盘空间
-                {
-                    s0 = s;
-                    s = FAT[s];
-                    FAT[s0] = 0;
-                    FAT[0]++;
-                }
+                fleshBlock(fcbp);//确定删除执行
             }
             block = FAT[block];
         }
@@ -2223,14 +2226,7 @@ int DelComd(int k) //del(删除文件)命令处理函数
             if (yn == 'N' || yn == 'n')
                 return 0; //不删除返回
         }
-        fcbp->FileName[0] = (char)0xe5; //删除目录项
-        while (s > 0)                   //回收磁盘空间
-        {
-            s0 = s;
-            s = FAT[s];
-            FAT[s0] = 0;
-            FAT[0]++;
-        }
+        fleshBlock(fcbp);
     }
     return 1;
 }
@@ -3059,7 +3055,7 @@ int AttribComd(int k) //attrib命令的处理函数：修改文件或目录属性
                 fcbp = (FCB *)Disk[block];
                 for (int i = 0; i < SIZE / sizeof(FCB); i++, fcbp++)
                 {
-                    if (fcbp->FileName[0] == (char)0xe5)
+                    if (fcbp->FileName[0] == (char)0xe5||strcmp(fcbp->FileName,"..")==0)
                     {
                         continue;
                     }
