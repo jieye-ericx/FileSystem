@@ -1,5 +1,6 @@
-create a
+md a
+cd a
+dir
+create b
 write
-close
-type a>>map
-type a>>map
+

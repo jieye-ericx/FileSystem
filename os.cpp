@@ -3728,18 +3728,20 @@ int replaceComd(int k)
     {
         //取FileName2所在目录的首块号
         secondDirBlock = ProcessPath(comd[2], FileName2, k, 0, (char)16);
-        if (secondDirBlock < 1) //目标路径错误
-            return secondDirBlock;
-        //取FileName2(目标文件)的首块号(查其存在性)
-        secondFileBlock = FindFCB(FileName2, secondDirBlock, (char)16, fcbp);
-        if (secondFileBlock < 0)
+        if (secondDirBlock < 0)
         {
-            cout << "\n被取代文件不存在。\n";
+            cout << "\n目录名指定路径错误或不为目录。\n";
             return -1;
+        }
+        if(strcmp(FileName2,"")!=0){//说明最后一个“/”后面还有个名字
+            secondDirBlock = FindFCB(FileName2, secondDirBlock, (char)16, fcbp);
+            if(secondDirBlock<0){
+                cout << "最后一个目录名错误或不为目录" << endl;
+                return -1;
+            }
         }
     }
 
-    s0 = secondFileBlock;
     //取FileName2(目标文件)的首块号(查其存在性)
     secondFileBlock = FindFCB(FileName1, secondDirBlock, attrib, fcbp);
     if (secondFileBlock < 0)
@@ -3761,9 +3763,9 @@ int replaceComd(int k)
         return -3;
     }
 
-    if (fcbp->Fattrib > '\07') //存在同名目标目录
+    if (fcbp->Fattrib > (char)7) //存在同名目标目录
     {
-        cout << "\n目标目录里存在的是同名的目录。\n";
+        cout << "\n目标目录里存在同名目录。\n";
         return -2;
     }
     else
@@ -3789,14 +3791,7 @@ int replaceComd(int k)
                 return -5;
             }
 
-            fcbp->FileName[0] = (char)0xe5; //删除目录项
-            while (secondFileBlock > 0)     //回收磁盘空间
-            {
-                s0 = secondFileBlock;
-                secondFileBlock = FAT[secondFileBlock];
-                FAT[s0] = 0;
-                FAT[0]++;
-            }
+            fleshBlock(fcbp);
 
             i = FindBlankFCB(secondDirBlock, fcbp2);
             if (i < 0)
@@ -3910,7 +3905,7 @@ int moveComd(int k)
                 cout << "有同名目录，无法迁移" << endl;
                 return -1;
             }
-            if (isExistFile1 >= 0)
+            if (isExistFile1 >= 0) //有同名文件
             {
                 char b;
                 cout << "有同名文件，是否覆盖？y/n" << endl;
