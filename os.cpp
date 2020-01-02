@@ -237,11 +237,11 @@ int showAttribute(FCB *fcbp)
     char Attr[5], Attr1[4] = "RHS";
     char or_and[6] = {(char)1, (char)2, (char)4, (char)30, (char)29, (char)27};
     char Attrib = fcbp->Fattrib & (char)7;
-    cout << setw(5) << fcbp->FileName;
+    cout << setw(11) << fcbp->FileName;
     if(fcbp->Fattrib>=(char)7){
-        cout <<setw(5)<< " <DIR> ";
+        cout <<setw(7)<< " <DIR> ";
     }else{
-        cout <<setw(5)<< "       ";
+        cout <<setw(7)<< "       ";
     }
     if (Attrib == (char)0)
         strcpy(Attr, "普通");
@@ -761,7 +761,7 @@ void HelpComd() //help命令，帮助信息(显示各命令格式)
 int GetAttrib(char *str, char &attrib)
 {
     int i, len;
-    char ar = '\01', ah = '\02', as = '\04';
+    char ar = (char)1, ah = (char)2, as = (char)4;
     // if (str[0] != '|')
     // {
     // 	cout << "\n命令中属性参数错误。\n";
@@ -1182,7 +1182,7 @@ int MdComd(int k) //md命令处理函数
     if (k == 2) //命令形式：md <目录名> |<属性符>
     {
         i = GetAttrib(comd[2], attrib);
-        // cout<<"md 有属性"<<i;
+        cout << (int)attrib;
         if (i < 0)
             return i;
     }
