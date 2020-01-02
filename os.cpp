@@ -964,7 +964,6 @@ int DirComd(int k) //dir命令，显示指定目录的内容（文件名或目�
             else
             {
                 strcat(buf, "   ");
-                cout << p->Fsize << "aaaaaaaaad" << endl;
                 // sprintf(tempBuf, "%d", p->Fsize);
                 tempBuf=itoa(p->Fsize);
                 strcat(buf, tempBuf);
